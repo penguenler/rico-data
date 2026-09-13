@@ -1,6 +1,7 @@
 const fs = require("node:fs/promises");
 
 const BASE_URL = "https://www.turkiyeshell.com/pompatest/";
+const SHELL_URL = "https://pompafiyat.turkiyeshell.com/api/Public/prices";
 const OPET_URL = "https://api.opet.com.tr/api/fuelprices/allprices";
 const PETROL_OFISI_URL = "https://www.petrolofisi.com.tr/akaryakit-fiyatlari";
 const OPET_PRICES_URL = "https://api.opet.com.tr/api/fuelprices/prices";
@@ -93,6 +94,8 @@ const PROVINCES = [
 	{ code: "066", name: "YOZGAT" },
 	{ code: "067", name: "ZONGULDAK" }
 ];
+
+let SHELL_PRICE_LIST = [];
 
 function extractInputValue(html, inputName) {
 	const escapedName = inputName.replace(/[$]/g, "\\$");
@@ -230,67 +233,41 @@ async function fetchStateAndCookie() {
 }
 
 async function fetchProvincePrices(province) {
-	const state = await fetchStateAndCookie();
-	const callbackParam = `c0:{"Action":"OnProvinceSelect","Params":{"county_code":null,"province_code":"${province.code}"}}`;
+	if (SHELL_PRICE_LIST.length === 0) {
+		const url = `${SHELL_URL}`;
+		const response = await fetch(url, {
+			method: "GET",
+			headers: {
+				accept: "application/json",
+				"user-agent": "Mozilla/5.0"
+			}
+		});
 
-	const form = new URLSearchParams({
-		__EVENTTARGET: "",
-		__EVENTARGUMENT: "",
-		__VIEWSTATE: state.viewState,
-		__VIEWSTATEGENERATOR: state.viewStateGenerator,
-		__EVENTVALIDATION: state.eventValidation,
-		cb_all_cb_province_VI: province.code,
-		"cb_all$cb_province": province.name,
-		cb_all_cb_province_DDDWS: "0:0:-1:-10000:-10000:0:-10000:-10000:1:0:0:0",
-		cb_all_cb_province_DDD_LDeletedItems: "",
-		cb_all_cb_province_DDD_LInsertedItems: "",
-		cb_all_cb_province_DDD_LCustomCallback: "",
-		"cb_all$cb_province$DDD$L": province.code,
-		cb_all_cb_county_VI: "",
-		"cb_all$cb_county": "",
-		cb_all_cb_county_DDDWS: "0:0:-1:-10000:-10000:0:-10000:-10000:1:0:0:0",
-		cb_all_cb_county_DDD_LDeletedItems: "",
-		cb_all_cb_county_DDD_LInsertedItems: "",
-		cb_all_cb_county_DDD_LCustomCallback: "",
-		"cb_all$cb_county$DDD$L": "",
-		"cb_all$grdPrices$DXSelInput": "",
-		"cb_all$grdPrices$DXKVInput": "[]",
-		"cb_all$grdPrices$CallbackState": state.callbackState,
-		__CALLBACKID: "cb_all",
-		__CALLBACKPARAM: callbackParam
-	});
+		if (!response.ok) {
+			throw new Error(`Shell prices GET failed for ${shellProvinceCode}: ${response.status}`);
+		}
 
-	const response = await fetch(BASE_URL, {
-		method: "POST",
-		headers: {
-			"accept": "*/*",
-			"accept-language": "tr-TR,tr;q=0.9,en;q=0.8",
-			"cache-control": "no-cache",
-			"content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-			"cookie": `ASP.NET_SessionId=${state.sessionId}`,
-			"origin": "https://www.turkiyeshell.com",
-			"pragma": "no-cache",
-			"referer": BASE_URL,
-			"user-agent": "Mozilla/5.0"
-		},
-		body: form
-	});
+		const list = await response.json();
+		const priceList = list.groups.map(x => ({
+			"cityCode": x.cityCode,
+			"cityName": x.cityName,
+			"gasolineAmount": Object.fromEntries(Object.entries(x.counties[0].prices).map(([key, value]) => [key.trim(), value]))["37"],
+			"dieselAmount": Object.fromEntries(Object.entries(x.counties[0].prices).map(([key, value]) => [key.trim(), value]))["34"],
+			"lpgAmount": Object.fromEntries(Object.entries(x.counties[0].prices).map(([key, value]) => [key.trim(), value]))["5"],
+		}));
 
-	if (!response.ok) {
-		throw new Error(`POST failed for ${province.code}: ${response.status}`);
+		SHELL_PRICE_LIST = priceList;
 	}
 
-	const callbackText = await response.text();
-	const html = extractCallbackHtml(callbackText);
-	const price = extractSecondRowPrices(html);
+	const price = SHELL_PRICE_LIST.find(x => x.cityCode === province.code);
 
 	return {
 		provinceCode: province.code,
 		provinceName: province.name,
-		districtName: price.districtName,
-		gasolineAmount: price.gasolineAmount,
-		dieselAmount: price.dieselAmount,
-		lpgAmount: price.lpgAmount
+		districtName: "",//price.districtName,
+		gasolineAmount: price ? price.gasolineAmount : 0,
+		dieselAmount: price ? price.dieselAmount : 0,
+		lpgAmount: price ? price.lpgAmount : 0
 	};
 }
 
